@@ -3,10 +3,12 @@ package fritty.dialogue.dialogue;
 import fritty.dialogue.storage.DialogueRepository;
 
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 public final class DialogueManager {
 
@@ -16,69 +18,97 @@ public final class DialogueManager {
             new LinkedHashMap<>();
 
     public DialogueManager(DialogueRepository repository) {
-        this.repository = repository;
+        this.repository = Objects.requireNonNull(
+                repository,
+                "Dialogue repository cannot be null"
+        );
     }
 
-    public void loadAll() throws SQLException {
-        dialogues.clear();
+    public synchronized void loadAll() throws SQLException {
+        Map<String, Dialogue> loaded = new LinkedHashMap<>();
 
         for (Dialogue dialogue : repository.loadAll()) {
-            dialogues.put(dialogue.getId(), dialogue);
+            loaded.put(dialogue.getId(), dialogue);
         }
+
+        dialogues.clear();
+        dialogues.putAll(loaded);
     }
 
-    public Dialogue create(String name) throws SQLException {
+    public synchronized void reload() throws SQLException {
+        loadAll();
+    }
+
+    public synchronized boolean reload(String dialogueId)
+            throws SQLException {
+
+        Dialogue dialogue = repository.load(dialogueId);
+
+        if (dialogue == null) {
+            return dialogues.remove(dialogueId) != null;
+        }
+
+        dialogues.put(dialogueId, dialogue);
+        return true;
+    }
+
+    public synchronized Dialogue create(String name) {
         Dialogue dialogue = new Dialogue(name);
 
-        repository.save(dialogue);
         dialogues.put(dialogue.getId(), dialogue);
 
         return dialogue;
     }
 
-    public Dialogue get(String dialogueId) {
+    public synchronized Dialogue get(String dialogueId) {
         return dialogues.get(dialogueId);
     }
 
-    public boolean exists(String dialogueId) {
+    public synchronized boolean exists(String dialogueId) {
         return dialogues.containsKey(dialogueId);
     }
 
-    public Collection<Dialogue> getAll() {
-        return Collections.unmodifiableCollection(
-                dialogues.values()
+    public synchronized Collection<Dialogue> getAll() {
+        return Collections.unmodifiableList(
+                new ArrayList<>(dialogues.values())
         );
     }
 
-    public int getCount() {
+    public synchronized int getCount() {
         return dialogues.size();
     }
 
-    public void save(Dialogue dialogue) throws SQLException {
-        if (dialogue == null) {
-            throw new IllegalArgumentException(
-                    "Dialogue cannot be null"
-            );
-        }
+    public synchronized void save(Dialogue dialogue)
+            throws SQLException {
+
+        Objects.requireNonNull(
+                dialogue,
+                "Dialogue cannot be null"
+        );
 
         repository.save(dialogue);
         dialogues.put(dialogue.getId(), dialogue);
     }
 
-    public boolean delete(String dialogueId) throws SQLException {
-        if (!dialogues.containsKey(dialogueId)) {
-            return false;
+    public synchronized boolean delete(String dialogueId)
+            throws SQLException {
+
+        boolean deleted = repository.delete(dialogueId);
+
+        if (deleted) {
+            dialogues.remove(dialogueId);
         }
 
-        repository.delete(dialogueId);
-        dialogues.remove(dialogueId);
-
-        return true;
+        return deleted;
     }
 
-    public void saveAll() throws SQLException {
+    public synchronized void saveAll() throws SQLException {
         for (Dialogue dialogue : dialogues.values()) {
             repository.save(dialogue);
         }
+    }
+
+    public synchronized void unload() {
+        dialogues.clear();
     }
 }
