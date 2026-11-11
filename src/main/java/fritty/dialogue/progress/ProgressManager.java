@@ -14,29 +14,47 @@ public final class ProgressManager {
     private final Map<UUID, PlayerProgress> cache =
             new ConcurrentHashMap<>();
 
+    private final Map<UUID, Object> playerLocks =
+            new ConcurrentHashMap<>();
+
     public ProgressManager(ProgressRepository repository) {
+        if (repository == null) {
+            throw new IllegalArgumentException(
+                    "Progress repository cannot be null"
+            );
+        }
+
         this.repository = repository;
     }
 
-    public PlayerProgress get(UUID playerId) throws SQLException {
-        return cache.computeIfAbsent(playerId, id -> {
-            try {
-                return repository.load(id);
-            } catch (SQLException exception) {
-                throw new ProgressLoadException(exception);
-            }
-        });
-    }
+    public PlayerProgress get(UUID playerId)
+            throws SQLException {
 
-    public void unload(UUID playerId) {
-        cache.remove(playerId);
+        requirePlayerId(playerId);
+
+        synchronized (getPlayerLock(playerId)) {
+            PlayerProgress cached = cache.get(playerId);
+
+            if (cached != null) {
+                return cached;
+            }
+
+            PlayerProgress loaded =
+                    repository.load(playerId);
+
+            cache.put(playerId, loaded);
+
+            return loaded;
+        }
     }
 
     public boolean hasCompletedDialogue(
             UUID playerId,
             String dialogueId
     ) throws SQLException {
-        return get(playerId).hasCompletedDialogue(dialogueId);
+
+        return get(playerId)
+                .hasCompletedDialogue(dialogueId);
     }
 
     public boolean hasCompletedBranch(
@@ -44,10 +62,12 @@ public final class ProgressManager {
             String dialogueId,
             String branchId
     ) throws SQLException {
-        return get(playerId).hasCompletedBranch(
-                dialogueId,
-                branchId
-        );
+
+        return get(playerId)
+                .hasCompletedBranch(
+                        dialogueId,
+                        branchId
+                );
     }
 
     public boolean hasSelectedAnswer(
@@ -56,19 +76,28 @@ public final class ProgressManager {
             String branchId,
             String answerId
     ) throws SQLException {
-        return get(playerId).hasSelectedAnswer(
-                dialogueId,
-                branchId,
-                answerId
-        );
+
+        return get(playerId)
+                .hasSelectedAnswer(
+                        dialogueId,
+                        branchId,
+                        answerId
+                );
     }
 
     public void completeDialogue(
             UUID playerId,
             String dialogueId
     ) throws SQLException {
-        get(playerId).completeDialogue(dialogueId);
-        repository.completeDialogue(playerId, dialogueId);
+
+        synchronized (getPlayerLock(playerId)) {
+            repository.completeDialogue(
+                    playerId,
+                    dialogueId
+            );
+
+            get(playerId).addCompletedDialogue(dialogueId);
+        }
     }
 
     public void completeBranch(
@@ -76,8 +105,19 @@ public final class ProgressManager {
             String dialogueId,
             String branchId
     ) throws SQLException {
-        get(playerId).completeBranch(dialogueId, branchId);
-        repository.completeBranch(playerId, dialogueId, branchId);
+
+        synchronized (getPlayerLock(playerId)) {
+            repository.completeBranch(
+                    playerId,
+                    dialogueId,
+                    branchId
+            );
+
+            get(playerId).addCompletedBranch(
+                    dialogueId,
+                    branchId
+            );
+        }
     }
 
     public void selectAnswer(
@@ -86,23 +126,31 @@ public final class ProgressManager {
             String branchId,
             String answerId
     ) throws SQLException {
-        get(playerId).selectAnswer(dialogueId, branchId, answerId);
 
-        repository.selectAnswer(
-                playerId,
-                dialogueId,
-                branchId,
-                answerId
-        );
+        synchronized (getPlayerLock(playerId)) {
+            repository.selectAnswer(
+                    playerId,
+                    dialogueId,
+                    branchId,
+                    answerId
+            );
+
+            get(playerId).addSelectedAnswer(
+                    dialogueId,
+                    branchId,
+                    answerId
+            );
+        }
     }
 
-    public void reset(UUID playerId) throws SQLException {
-        repository.resetPlayer(playerId);
+    public void resetPlayer(UUID playerId)
+            throws SQLException {
 
-        PlayerProgress progress = cache.get(playerId);
+        requirePlayerId(playerId);
 
-        if (progress != null) {
-            progress.reset();
+        synchronized (getPlayerLock(playerId)) {
+            repository.resetPlayer(playerId);
+            cache.remove(playerId);
         }
     }
 
@@ -110,9 +158,18 @@ public final class ProgressManager {
             UUID playerId,
             String dialogueId
     ) throws SQLException {
-        get(playerId).removeDialogue(dialogueId);
 
-        repository.deleteDialogueProgress(playerId, dialogueId);
+        synchronized (getPlayerLock(playerId)) {
+            repository.deleteDialogueProgress(
+                    playerId,
+                    dialogueId
+            );
+
+            PlayerProgress progress = get(playerId);
+
+            progress.removeCompletedDialogue(dialogueId);
+            progress.removeDialogueProgress(dialogueId);
+        }
     }
 
     public void deleteBranchProgress(
@@ -120,13 +177,26 @@ public final class ProgressManager {
             String dialogueId,
             String branchId
     ) throws SQLException {
-        get(playerId).removeBranch(dialogueId, branchId);
 
-        repository.deleteBranchProgress(
-                playerId,
-                dialogueId,
-                branchId
-        );
+        synchronized (getPlayerLock(playerId)) {
+            repository.deleteBranchProgress(
+                    playerId,
+                    dialogueId,
+                    branchId
+            );
+
+            PlayerProgress progress = get(playerId);
+
+            progress.removeCompletedBranch(
+                    dialogueId,
+                    branchId
+            );
+
+            progress.removeBranchAnswers(
+                    dialogueId,
+                    branchId
+            );
+        }
     }
 
     public void deleteAnswerProgress(
@@ -135,49 +205,55 @@ public final class ProgressManager {
             String branchId,
             String answerId
     ) throws SQLException {
-        get(playerId).removeAnswer(dialogueId, branchId, answerId);
 
-        repository.deleteAnswerProgress(
-                playerId,
-                dialogueId,
-                branchId,
-                answerId
-        );
+        synchronized (getPlayerLock(playerId)) {
+            repository.deleteAnswerProgress(
+                    playerId,
+                    dialogueId,
+                    branchId,
+                    answerId
+            );
+
+            get(playerId).removeSelectedAnswer(
+                    dialogueId,
+                    branchId,
+                    answerId
+            );
+        }
     }
 
-    public void markDialogueCompleted(
-            UUID playerId,
-            String dialogueId
-    ) throws SQLException {
-        completeDialogue(playerId, dialogueId);
+    public void unloadPlayer(UUID playerId) {
+        if (playerId == null) {
+            return;
+        }
+
+        synchronized (getPlayerLock(playerId)) {
+            cache.remove(playerId);
+        }
     }
 
-    public void markBranchCompleted(
-            UUID playerId,
-            String dialogueId,
-            String branchId
-    ) throws SQLException {
-        completeBranch(playerId, dialogueId, branchId);
-    }
-
-    public void markAnswerSelected(
-            UUID playerId,
-            String dialogueId,
-            String branchId,
-            String answerId
-    ) throws SQLException {
-        selectAnswer(playerId, dialogueId, branchId, answerId);
-    }
-
-    public void unloadAll() {
+    public void clearCache() {
         cache.clear();
     }
 
-    private static final class ProgressLoadException
-            extends RuntimeException {
+    public int getCachedPlayerCount() {
+        return cache.size();
+    }
 
-        private ProgressLoadException(SQLException cause) {
-            super(cause);
+    private Object getPlayerLock(UUID playerId) {
+        requirePlayerId(playerId);
+
+        return playerLocks.computeIfAbsent(
+                playerId,
+                ignored -> new Object()
+        );
+    }
+
+    private void requirePlayerId(UUID playerId) {
+        if (playerId == null) {
+            throw new IllegalArgumentException(
+                    "Player UUID cannot be null"
+            );
         }
     }
 }
