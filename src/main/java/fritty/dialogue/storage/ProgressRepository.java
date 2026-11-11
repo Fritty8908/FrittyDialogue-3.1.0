@@ -19,15 +19,11 @@ public final class ProgressRepository {
     public PlayerProgress load(UUID playerId) throws SQLException {
         PlayerProgress progress = new PlayerProgress(playerId);
 
-        try (Connection connection = database.getConnection()) {
-            if (connection == null || connection.isClosed()) {
-                throw new SQLException("Database is not connected");
-            }
+        Connection connection = getConnection();
 
-            loadDialogues(connection, playerId, progress);
-            loadBranches(connection, playerId, progress);
-            loadAnswers(connection, playerId, progress);
-        }
+        loadDialogues(connection, playerId, progress);
+        loadBranches(connection, playerId, progress);
+        loadAnswers(connection, playerId, progress);
 
         return progress;
     }
@@ -168,23 +164,20 @@ public final class ProgressRepository {
     }
 
     public void resetPlayer(UUID playerId) throws SQLException {
-        String[] tables = {
-                "answer_progress",
-                "branch_progress",
-                "player_progress"
-        };
-
-        Connection connection = database.getConnection();
-
-        if (connection == null || connection.isClosed()) {
-            throw new SQLException("Database is not connected");
-        }
+        Connection connection = getConnection();
 
         try {
             connection.setAutoCommit(false);
 
+            String[] tables = {
+                    "answer_progress",
+                    "branch_progress",
+                    "player_progress"
+            };
+
             for (String table : tables) {
-                String sql = "DELETE FROM " + table + " WHERE player_uuid = ?";
+                String sql = "DELETE FROM " + table
+                        + " WHERE player_uuid = ?";
 
                 try (PreparedStatement statement =
                              connection.prepareStatement(sql)) {
@@ -194,9 +187,11 @@ public final class ProgressRepository {
             }
 
             connection.commit();
+
         } catch (SQLException exception) {
             connection.rollback();
             throw exception;
+
         } finally {
             connection.setAutoCommit(true);
         }
@@ -208,11 +203,7 @@ public final class ProgressRepository {
             String... values
     ) throws SQLException {
 
-        Connection connection = database.getConnection();
-
-        if (connection == null || connection.isClosed()) {
-            throw new SQLException("Database is not connected");
-        }
+        Connection connection = getConnection();
 
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, playerId.toString());
@@ -223,5 +214,15 @@ public final class ProgressRepository {
 
             statement.executeUpdate();
         }
+    }
+
+    private Connection getConnection() throws SQLException {
+        Connection connection = database.getConnection();
+
+        if (connection == null || connection.isClosed()) {
+            throw new SQLException("Database is not connected");
+        }
+
+        return connection;
     }
 }
