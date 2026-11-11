@@ -1,112 +1,70 @@
 package fritty.dialogue.dialogue;
 
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.Objects;
 
-public final class DialogueStructureValidator {
+public final class DialogueStructureService {
 
-    private DialogueStructureValidator() {
+    private final BranchCreationService branchCreationService;
+    private final AnswerCreationService answerCreationService;
+
+    public DialogueStructureService() {
+        this.branchCreationService = new BranchCreationService();
+        this.answerCreationService = new AnswerCreationService();
     }
 
-    public static void validate(Dialogue dialogue) {
-        if (dialogue == null) {
-            throw new IllegalArgumentException(
-                    "Діалог не може бути порожнім."
-            );
-        }
-
-        Map<String, Branch> branches = dialogue.getBranches();
-
-        if (branches == null) {
-            throw new IllegalStateException(
-                    "Список гілок діалогу не ініціалізований."
-            );
-        }
-
-        Set<String> branchIds = new HashSet<>();
-
-        for (Map.Entry<String, Branch> entry : branches.entrySet()) {
-            Branch branch = entry.getValue();
-
-            if (branch == null) {
-                throw new IllegalStateException(
-                        "Діалог містить порожню гілку."
-                );
-            }
-
-            String branchId = BranchIdValidator.validate(branch.getId());
-
-            if (!entry.getKey().equals(branchId)) {
-                throw new IllegalStateException(
-                        "ID гілки не збігається з ключем у списку гілок: "
-                                + branchId
-                );
-            }
-
-            if (!branchIds.add(branchId)) {
-                throw new IllegalStateException(
-                        "Знайдено повторний ID гілки: " + branchId
-                );
-            }
-
-            validateBranch(branch, branches);
-        }
-    }
-
-    private static void validateBranch(
-            Branch branch,
-            Map<String, Branch> branches
+    public Branch createBranch(
+            Dialogue dialogue,
+            String name,
+            String npcText
     ) {
-        String nextBranchId = branch.getNextBranchId();
+        Objects.requireNonNull(dialogue, "Dialogue cannot be null");
 
-        if (nextBranchId != null && !nextBranchId.isBlank()
-                && !branches.containsKey(nextBranchId)) {
-            throw new IllegalStateException(
-                    "Гілка " + branch.getId()
-                            + " посилається на відсутню гілку "
-                            + nextBranchId
+        Branch branch = branchCreationService.create(
+                name,
+                npcText,
+                dialogue.getBranches()
+        );
+
+        dialogue.getBranches().put(branch.getId(), branch);
+
+        return branch;
+    }
+
+    public Answer createAnswer(
+            Dialogue dialogue,
+            Branch branch,
+            String text,
+            String targetBranchId
+    ) {
+        Objects.requireNonNull(dialogue, "Dialogue cannot be null");
+        Objects.requireNonNull(branch, "Branch cannot be null");
+
+        if (!dialogue.getBranches().containsKey(branch.getId())) {
+            throw new IllegalArgumentException(
+                    "Гілка не належить цьому діалогу."
             );
         }
 
-        if (branch.getAnswers() == null) {
-            throw new IllegalStateException(
-                    "Список відповідей гілки "
-                            + branch.getId()
-                            + " не ініціалізований."
+        if (targetBranchId != null
+                && !targetBranchId.isBlank()
+                && !dialogue.getBranches().containsKey(targetBranchId)) {
+            throw new IllegalArgumentException(
+                    "Цільова гілка не існує в цьому діалозі."
             );
         }
 
-        Set<String> answerIds = new HashSet<>();
+        Answer answer = answerCreationService.create(
+                text,
+                targetBranchId,
+                branch.getAnswers()
+        );
 
-        for (Answer answer : branch.getAnswers()) {
-            if (answer == null) {
-                throw new IllegalStateException(
-                        "Гілка " + branch.getId()
-                                + " містить порожню відповідь."
-                );
-            }
+        branch.getAnswers().add(answer);
 
-            String answerId = AnswerIdValidator.validate(answer.getId());
+        return answer;
+    }
 
-            if (!answerIds.add(answerId)) {
-                throw new IllegalStateException(
-                        "Повторний ID відповіді " + answerId
-                                + " у гілці " + branch.getId()
-                );
-            }
-
-            String targetBranchId = answer.getTargetBranchId();
-
-            if (targetBranchId != null
-                    && !targetBranchId.isBlank()
-                    && !branches.containsKey(targetBranchId)) {
-                throw new IllegalStateException(
-                        "Відповідь " + answerId
-                                + " посилається на відсутню гілку "
-                                + targetBranchId
-                );
-            }
-        }
+    public void validate(Dialogue dialogue) {
+        DialogueStructureValidator.validate(dialogue);
     }
 }
