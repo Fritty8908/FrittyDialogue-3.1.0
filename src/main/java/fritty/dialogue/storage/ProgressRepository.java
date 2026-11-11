@@ -18,7 +18,6 @@ public final class ProgressRepository {
 
     public PlayerProgress load(UUID playerId) throws SQLException {
         PlayerProgress progress = new PlayerProgress(playerId);
-
         Connection connection = getConnection();
 
         loadDialogues(connection, playerId, progress);
@@ -33,7 +32,6 @@ public final class ProgressRepository {
             UUID playerId,
             PlayerProgress progress
     ) throws SQLException {
-
         String sql = """
                 SELECT dialogue_id
                 FROM player_progress
@@ -58,7 +56,6 @@ public final class ProgressRepository {
             UUID playerId,
             PlayerProgress progress
     ) throws SQLException {
-
         String sql = """
                 SELECT dialogue_id, branch_id
                 FROM branch_progress
@@ -84,7 +81,6 @@ public final class ProgressRepository {
             UUID playerId,
             PlayerProgress progress
     ) throws SQLException {
-
         String sql = """
                 SELECT dialogue_id, branch_id, answer_id
                 FROM answer_progress
@@ -110,7 +106,6 @@ public final class ProgressRepository {
             UUID playerId,
             String dialogueId
     ) throws SQLException {
-
         String sql = """
                 INSERT INTO player_progress (
                     player_uuid, dialogue_id, completed
@@ -128,7 +123,6 @@ public final class ProgressRepository {
             String dialogueId,
             String branchId
     ) throws SQLException {
-
         String sql = """
                 INSERT INTO branch_progress (
                     player_uuid, dialogue_id, branch_id, completed
@@ -147,7 +141,6 @@ public final class ProgressRepository {
             String branchId,
             String answerId
     ) throws SQLException {
-
         String sql = """
                 INSERT INTO answer_progress (
                     player_uuid, dialogue_id, branch_id,
@@ -197,12 +190,144 @@ public final class ProgressRepository {
         }
     }
 
+    public void deleteDialogueProgress(
+            UUID playerId,
+            String dialogueId
+    ) throws SQLException {
+        Connection connection = getConnection();
+
+        try {
+            connection.setAutoCommit(false);
+
+            deleteByDialogue(
+                    connection,
+                    "answer_progress",
+                    playerId,
+                    dialogueId
+            );
+
+            deleteByDialogue(
+                    connection,
+                    "branch_progress",
+                    playerId,
+                    dialogueId
+            );
+
+            deleteByDialogue(
+                    connection,
+                    "player_progress",
+                    playerId,
+                    dialogueId
+            );
+
+            connection.commit();
+
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    public void deleteBranchProgress(
+            UUID playerId,
+            String dialogueId,
+            String branchId
+    ) throws SQLException {
+        Connection connection = getConnection();
+
+        try {
+            connection.setAutoCommit(false);
+
+            String answerSql = """
+                    DELETE FROM answer_progress
+                    WHERE player_uuid = ?
+                    AND dialogue_id = ?
+                    AND branch_id = ?
+                    """;
+
+            try (PreparedStatement statement =
+                         connection.prepareStatement(answerSql)) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, dialogueId);
+                statement.setString(3, branchId);
+                statement.executeUpdate();
+            }
+
+            String branchSql = """
+                    DELETE FROM branch_progress
+                    WHERE player_uuid = ?
+                    AND dialogue_id = ?
+                    AND branch_id = ?
+                    """;
+
+            try (PreparedStatement statement =
+                         connection.prepareStatement(branchSql)) {
+                statement.setString(1, playerId.toString());
+                statement.setString(2, dialogueId);
+                statement.setString(3, branchId);
+                statement.executeUpdate();
+            }
+
+            connection.commit();
+
+        } catch (SQLException exception) {
+            connection.rollback();
+            throw exception;
+
+        } finally {
+            connection.setAutoCommit(true);
+        }
+    }
+
+    public void deleteAnswerProgress(
+            UUID playerId,
+            String dialogueId,
+            String branchId,
+            String answerId
+    ) throws SQLException {
+        String sql = """
+                DELETE FROM answer_progress
+                WHERE player_uuid = ?
+                AND dialogue_id = ?
+                AND branch_id = ?
+                AND answer_id = ?
+                """;
+
+        Connection connection = getConnection();
+
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, dialogueId);
+            statement.setString(3, branchId);
+            statement.setString(4, answerId);
+            statement.executeUpdate();
+        }
+    }
+
+    private void deleteByDialogue(
+            Connection connection,
+            String table,
+            UUID playerId,
+            String dialogueId
+    ) throws SQLException {
+        String sql = "DELETE FROM " + table
+                + " WHERE player_uuid = ? AND dialogue_id = ?";
+
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, playerId.toString());
+            statement.setString(2, dialogueId);
+            statement.executeUpdate();
+        }
+    }
+
     private void execute(
             String sql,
             UUID playerId,
             String... values
     ) throws SQLException {
-
         Connection connection = getConnection();
 
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
