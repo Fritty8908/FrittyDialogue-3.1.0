@@ -1,217 +1,152 @@
 
-package fritty.dialogue.dialogue;
+package fritty.dialogue;
 
-import java.util.EnumMap;
-import java.util.Map;
-import java.util.Objects;
+import fritty.dialogue.command.DialogueCommand;
+import fritty.dialogue.dialogue.DialogueManager;
+import fritty.dialogue.gui.DialogueMenuClickListener;
+import fritty.dialogue.gui.DialogueMenuController;
+import fritty.dialogue.gui.DialogueMenuManager;
+import fritty.dialogue.storage.Database;
+import fritty.dialogue.storage.DialogueRepository;
+import org.bukkit.command.PluginCommand;
+import org.bukkit.plugin.java.JavaPlugin;
 
-/**
- * Stores explicitly configured values for a dialogue or branch.
- *
- * Dialogue settings contain dialogue-level overrides.
- * Branch settings contain branch-level overrides.
- *
- * Inherited and default values are resolved separately by
- * DialogueSettingsInheritanceResolver.
- */
-public class DialogueSettings {
+import java.sql.SQLException;
 
-    private final Map<SettingKey, Object> values =
-            new EnumMap<>(SettingKey.class);
+public final class FrittyDialogue extends JavaPlugin {
 
-    /**
-     * Returns an explicitly stored value.
-     * Does not resolve defaults or inherited values.
-     */
-    public Object get(SettingKey key) {
-        if (key == null) {
-            return null;
-        }
+    private Database database;
+    private DialogueManager dialogueManager;
+    private DialogueMenuManager menuManager;
+    private DialogueMenuController menuController;
 
-        return values.get(key);
-    }
+    @Override
+    public void onEnable() {
+        getLogger().info("Starting FrittyDialogue...");
 
-    /**
-     * Returns an explicitly stored value using its config key.
-     */
-    public Object get(String key) {
-        SettingKey settingKey = resolveKey(key);
+        try {
+            initializeDatabase();
+            initializeManagers();
+            registerCommands();
+            registerListeners();
 
-        return settingKey == null
-                ? null
-                : get(settingKey);
-    }
+            getLogger().info(
+                    "FrittyDialogue enabled. Loaded "
+                            + dialogueManager.getCount()
+                            + " dialogues."
+            );
 
-    /**
-     * Stores a value using its enum key.
-     */
-    public void set(SettingKey key, Object value) {
-        Objects.requireNonNull(
-                key,
-                "Setting key cannot be null"
-        );
+        } catch (Exception exception) {
+            getLogger().severe(
+                    "FrittyDialogue could not start: "
+                            + exception.getMessage()
+            );
 
-        SettingsValueValidator.validate(key, value);
-        values.put(key, value);
-    }
+            exception.printStackTrace();
 
-    /**
-     * Stores a value using its serialized config key.
-     */
-    public void set(String key, Object value) {
-        SettingKey settingKey = requireKey(key);
-        set(settingKey, value);
-    }
-
-    /**
-     * Checks whether this object explicitly overrides a setting.
-     */
-    public boolean has(SettingKey key) {
-        return key != null && values.containsKey(key);
-    }
-
-    /**
-     * Checks whether this object explicitly overrides a setting.
-     */
-    public boolean has(String key) {
-        SettingKey settingKey = resolveKey(key);
-
-        return settingKey != null && has(settingKey);
-    }
-
-    /**
-     * Compatibility alias used by existing branch code.
-     */
-    public boolean contains(SettingKey key) {
-        return has(key);
-    }
-
-    /**
-     * Compatibility alias used by existing branch code.
-     */
-    public boolean contains(String key) {
-        return has(key);
-    }
-
-    /**
-     * Removes an explicitly stored setting.
-     * The next resolution will use the inherited or default value.
-     */
-    public void clear(SettingKey key) {
-        if (key != null) {
-            values.remove(key);
-        }
-    }
-
-    /**
-     * Removes an explicitly stored setting by config key.
-     */
-    public void clear(String key) {
-        SettingKey settingKey = resolveKey(key);
-
-        if (settingKey != null) {
-            clear(settingKey);
-        }
-    }
-
-    /**
-     * Compatibility method used by existing branch code.
-     *
-     * @return true if a value was removed
-     */
-    public boolean remove(String key) {
-        SettingKey settingKey = resolveKey(key);
-
-        if (settingKey == null) {
-            return false;
-        }
-
-        return values.remove(settingKey) != null;
-    }
-
-    /**
-     * Returns a defensive copy of all explicit overrides.
-     */
-    public Map<SettingKey, Object> getAll() {
-        return new EnumMap<>(values);
-    }
-
-    /**
-     * Replaces all explicit overrides with those from another object.
-     */
-    public void copyFrom(DialogueSettings source) {
-        Objects.requireNonNull(
-                source,
-                "Source settings cannot be null"
-        );
-
-        if (source == this) {
-            return;
-        }
-
-        values.clear();
-
-        for (Map.Entry<SettingKey, Object> entry
-                : source.values.entrySet()) {
-            set(entry.getKey(), entry.getValue());
-        }
-    }
-
-    /**
-     * Copies explicit overrides from a map.
-     */
-    public void putAll(Map<SettingKey, Object> source) {
-        if (source == null || source.isEmpty()) {
-            return;
-        }
-
-        for (Map.Entry<SettingKey, Object> entry
-                : source.entrySet()) {
-            if (entry.getKey() != null
-                    && entry.getValue() != null) {
-                set(entry.getKey(), entry.getValue());
+            if (database != null) {
+                database.close();
             }
+
+            getServer().getPluginManager().disablePlugin(this);
         }
     }
 
-    /**
-     * Removes every explicit override.
-     */
-    public void clearAll() {
-        values.clear();
+    private void initializeDatabase() throws SQLException {
+        database = new Database(this);
+        database.connect();
+
+        getLogger().info("SQLite database connected.");
     }
 
-    public int size() {
-        return values.size();
+    private void initializeManagers() throws SQLException {
+        DialogueRepository repository =
+                new DialogueRepository(database);
+
+        dialogueManager = new DialogueManager(repository);
+        dialogueManager.loadAll();
+
+        menuManager = new DialogueMenuManager(this);
+
+        menuController = new DialogueMenuController(
+                dialogueManager,
+                menuManager
+        );
     }
 
-    public boolean isEmpty() {
-        return values.isEmpty();
-    }
+    private void registerCommands() {
+        PluginCommand command =
+                getCommand("frittydialogue");
 
-    /**
-     * Resolves a serialized key without throwing.
-     */
-    private SettingKey resolveKey(String key) {
-        if (key == null || key.isBlank()) {
-            return null;
-        }
-
-        return SettingKey.fromKey(key);
-    }
-
-    /**
-     * Resolves a serialized key and rejects unknown settings.
-     */
-    private SettingKey requireKey(String key) {
-        SettingKey settingKey = resolveKey(key);
-
-        if (settingKey == null) {
-            throw new IllegalArgumentException(
-                    "Невідомий параметр налаштувань: " + key
+        if (command == null) {
+            throw new IllegalStateException(
+                    "Command 'frittydialogue' is missing from plugin.yml"
             );
         }
 
-        return settingKey;
+        command.setExecutor(
+                new DialogueCommand(
+                        dialogueManager,
+                        player -> menuController.openMainMenu(
+                                player,
+                                0
+                        )
+                )
+        );
+    }
+
+    private void registerListeners() {
+        getServer().getPluginManager().registerEvents(
+                new DialogueMenuClickListener(
+                        menuManager,
+                        menuController
+                ),
+                this
+        );
+    }
+
+    @Override
+    public void onDisable() {
+        if (dialogueManager != null) {
+            try {
+                dialogueManager.saveAll();
+
+                getLogger().info(
+                        "Dialogue data saved."
+                );
+
+            } catch (SQLException exception) {
+                getLogger().severe(
+                        "Could not save dialogues: "
+                                + exception.getMessage()
+                );
+
+                exception.printStackTrace();
+            }
+
+            dialogueManager.unload();
+        }
+
+        if (database != null) {
+            database.close();
+        }
+
+        getLogger().info("FrittyDialogue disabled.");
+    }
+
+    public Database getDatabase() {
+        return database;
+    }
+
+    public DialogueManager getDialogueManager() {
+        return dialogueManager;
+    }
+
+    public DialogueMenuManager getMenuManager() {
+        return menuManager;
+    }
+
+    public DialogueMenuController getMenuController() {
+        return menuController;
     }
 }
