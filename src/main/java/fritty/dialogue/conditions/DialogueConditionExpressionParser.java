@@ -11,43 +11,41 @@ import java.util.function.Predicate;
  * Парсер логічних виразів умов діалогів.
  *
  * Підтримує:
- * AND, OR, NOT;
- * символи &&, ||, !;
- * круглі дужки;
- * вкладені вирази;
- * лапки;
- * екранування символів;
- * перевірку синтаксису;
- * отримання списку атомарних умов;
- * обчислення логічного результату.
+ * - AND, OR, NOT;
+ * - &&, ||, !;
+ * - круглі дужки;
+ * - значення у подвійних лапках;
+ * - екранування символів;
+ * - перевірку синтаксису;
+ * - обчислення виразів;
+ * - серіалізацію дерева;
+ * - отримання списку умов.
  *
  * Приклад:
  *
  * (DIALOGUE:farmer AND BRANCH:quest_1)
  * OR
- * (PERMISSION:dialogue.secret AND NOT TAG:blocked)
+ * (PERMISSION:"dialogue.secret" AND NOT TAG:blocked)
  */
 public final class DialogueConditionExpressionParser {
+
+    private static final int MAX_EXPRESSION_LENGTH = 4096;
+    private static final int MAX_TOKEN_COUNT = 512;
+    private static final int MAX_PARSE_DEPTH = 128;
 
     private DialogueConditionExpressionParser() {
     }
 
     public enum TokenType {
         IDENTIFIER,
+        STRING,
         AND,
         OR,
         NOT,
         LEFT_PAREN,
         RIGHT_PAREN,
         COLON,
-        STRING,
         END
-    }
-
-    public enum Operator {
-        AND,
-        OR,
-        NOT
     }
 
     public enum NodeType {
@@ -72,6 +70,13 @@ public final class DialogueConditionExpressionParser {
             String message,
             int position
     ) {
+        public ParseError {
+            message = message == null
+                    ? "Невідома помилка"
+                    : message;
+            position = Math.max(0, position);
+        }
+
         @Override
         public String toString() {
             return message + " (позиція " + position + ")";
@@ -113,13 +118,13 @@ public final class DialogueConditionExpressionParser {
 
             if (type.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Condition type cannot be empty"
+                        "Тип умови не може бути порожнім"
                 );
             }
 
             if (value.isBlank()) {
                 throw new IllegalArgumentException(
-                        "Condition value cannot be empty"
+                        "Значення умови не може бути порожнім"
                 );
             }
         }
@@ -158,6 +163,17 @@ public final class DialogueConditionExpressionParser {
             );
         }
 
+        public static ExpressionNode condition(
+                ConditionReference reference
+        ) {
+            return new ExpressionNode(
+                    NodeType.CONDITION,
+                    Objects.requireNonNull(reference),
+                    null,
+                    null
+            );
+        }
+
         public static ExpressionNode and(
                 ExpressionNode left,
                 ExpressionNode right
@@ -182,7 +198,9 @@ public final class DialogueConditionExpressionParser {
             );
         }
 
-        public static ExpressionNode not(ExpressionNode child) {
+        public static ExpressionNode not(
+                ExpressionNode child
+        ) {
             return new ExpressionNode(
                     NodeType.NOT,
                     null,
@@ -193,30 +211,35 @@ public final class DialogueConditionExpressionParser {
 
         private void validateStructure() {
             switch (type) {
-                case CONDITION:
-                    if (condition == null || left != null || right != null) {
+                case CONDITION -> {
+                    if (condition == null
+                            || left != null
+                            || right != null) {
                         throw new IllegalArgumentException(
-                                "Invalid condition node"
+                                "Некоректний вузол умови"
                         );
                     }
-                    break;
+                }
 
-                case NOT:
-                    if (condition != null || left == null || right != null) {
+                case NOT -> {
+                    if (condition != null
+                            || left == null
+                            || right != null) {
                         throw new IllegalArgumentException(
-                                "Invalid NOT node"
+                                "Некоректний вузол NOT"
                         );
                     }
-                    break;
+                }
 
-                case AND:
-                case OR:
-                    if (condition != null || left == null || right == null) {
+                case AND, OR -> {
+                    if (condition != null
+                            || left == null
+                            || right == null) {
                         throw new IllegalArgumentException(
-                                "Invalid binary node"
+                                "Некоректний логічний вузол"
                         );
                     }
-                    break;
+                }
             }
         }
 
@@ -247,12 +270,17 @@ public final class DialogueConditionExpressionParser {
     public static List<Token> tokenize(String expression) {
         if (expression == null) {
             throw new IllegalArgumentException(
-                    "Expression cannot be null"
+                    "Вираз не може бути null"
+            );
+        }
+
+        if (expression.length() > MAX_EXPRESSION_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Вираз перевищує допустиму довжину"
             );
         }
 
         List<Token> tokens = new ArrayList<>();
-
         int index = 0;
 
         while (index < expression.length()) {
@@ -292,7 +320,8 @@ public final class DialogueConditionExpressionParser {
                 continue;
             }
 
-            if (current == '&' && hasNext(expression, index, '&')) {
+            if (current == '&'
+                    && hasNext(expression, index, '&')) {
                 tokens.add(new Token(
                         TokenType.AND,
                         "AND",
@@ -302,7 +331,8 @@ public final class DialogueConditionExpressionParser {
                 continue;
             }
 
-            if (current == '|' && hasNext(expression, index, '|')) {
+            if (current == '|'
+                    && hasNext(expression, index, '|')) {
                 tokens.add(new Token(
                         TokenType.OR,
                         "OR",
@@ -330,7 +360,7 @@ public final class DialogueConditionExpressionParser {
                 tokens.add(new Token(
                         TokenType.STRING,
                         quoted.value(),
-                        index
+                        start
                 ));
 
                 index = quoted.nextIndex();
@@ -367,8 +397,10 @@ public final class DialogueConditionExpressionParser {
             }
 
             throw new IllegalArgumentException(
-                    "Unexpected character '" + current
-                            + "' at position " + index
+                    "Неприпустимий символ '"
+                            + current
+                            + "' на позиції "
+                            + index
             );
         }
 
@@ -378,12 +410,17 @@ public final class DialogueConditionExpressionParser {
                 expression.length()
         ));
 
+        if (tokens.size() > MAX_TOKEN_COUNT) {
+            throw new IllegalArgumentException(
+                    "Вираз містить забагато токенів"
+            );
+        }
+
         return List.copyOf(tokens);
     }
 
     /**
-     * Парсить вираз і повертає результат
-     * разом із повідомленнями про помилки.
+     * Парсить вираз і повертає дерево або помилки.
      */
     public static ParseResult parse(String expression) {
         if (expression == null || expression.isBlank()) {
@@ -398,7 +435,7 @@ public final class DialogueConditionExpressionParser {
 
         try {
             List<Token> tokens = tokenize(expression);
-            Parser parser = new Parser(tokens);
+            Parser parser = new Parser(tokens, expression);
 
             ExpressionNode root = parser.parseExpression();
 
@@ -407,19 +444,28 @@ public final class DialogueConditionExpressionParser {
                     Collections.emptyList()
             );
 
+        } catch (ParserException exception) {
+            return new ParseResult(
+                    null,
+                    List.of(new ParseError(
+                            exception.getMessage(),
+                            exception.position()
+                    ))
+            );
+
         } catch (IllegalArgumentException exception) {
             return new ParseResult(
                     null,
                     List.of(new ParseError(
                             exception.getMessage(),
-                            extractPosition(exception.getMessage())
+                            0
                     ))
             );
         }
     }
 
     /**
-     * Парсить вираз або викидає помилку.
+     * Парсить вираз або викидає виняток.
      */
     public static ExpressionNode parseOrThrow(
             String expression
@@ -436,7 +482,7 @@ public final class DialogueConditionExpressionParser {
     }
 
     /**
-     * Обчислює вираз за допомогою переданого перевіряльника.
+     * Обчислює логічний вираз.
      */
     public static boolean evaluate(
             ExpressionNode root,
@@ -478,7 +524,6 @@ public final class DialogueConditionExpressionParser {
         Objects.requireNonNull(root);
 
         List<ConditionReference> result = new ArrayList<>();
-
         collect(root, result);
 
         return List.copyOf(result);
@@ -503,7 +548,7 @@ public final class DialogueConditionExpressionParser {
     }
 
     /**
-     * Перевіряє, чи містить вираз певний тип умови.
+     * Перевіряє наявність типу умови.
      */
     public static boolean containsType(
             ExpressionNode root,
@@ -515,13 +560,10 @@ public final class DialogueConditionExpressionParser {
 
         String expected = normalize(type);
 
-        for (ConditionReference reference : collectConditions(root)) {
-            if (reference.type().equals(expected)) {
-                return true;
-            }
-        }
-
-        return false;
+        return collectConditions(root).stream()
+                .anyMatch(condition ->
+                        condition.type().equals(expected)
+                );
     }
 
     /**
@@ -534,7 +576,7 @@ public final class DialogueConditionExpressionParser {
     }
 
     /**
-     * Перевіряє глибину дерева.
+     * Обчислює глибину дерева.
      */
     public static int getDepth(ExpressionNode root) {
         if (root == null) {
@@ -557,27 +599,27 @@ public final class DialogueConditionExpressionParser {
     }
 
     /**
-     * Перевіряє обмеження складності виразу.
+     * Перевіряє обмеження складності.
      */
     public static boolean isWithinLimits(
             ExpressionNode root,
             int maxConditions,
             int maxDepth
     ) {
-        if (root == null || maxConditions < 1 || maxDepth < 1) {
+        if (root == null
+                || maxConditions < 1
+                || maxDepth < 1) {
             return false;
         }
 
         return countConditions(root) <= maxConditions
                 && getDepth(root) <= maxDepth;
-    }
-
+                }
     /**
      * Перетворює дерево назад у текстовий вираз.
      */
     public static String serialize(ExpressionNode root) {
         Objects.requireNonNull(root);
-
         return serializeNode(root, 0);
     }
 
@@ -586,37 +628,52 @@ public final class DialogueConditionExpressionParser {
             int parentPriority
     ) {
         int priority = priority(node.type());
-
         String result;
 
         switch (node.type()) {
-            case CONDITION:
+            case CONDITION -> {
                 result = node.condition().type()
                         + ":"
-                        + quoteIfNeeded(node.condition().value());
-                break;
+                        + quoteIfNeeded(
+                                node.condition().value()
+                        );
+            }
 
-            case NOT:
+            case NOT -> {
                 result = "NOT "
-                        + serializeNode(node.left(), priority);
-                break;
+                        + serializeNode(
+                                node.left(),
+                                priority
+                        );
+            }
 
-            case AND:
-                result = serializeNode(node.left(), priority)
+            case AND -> {
+                result = serializeNode(
+                        node.left(),
+                        priority
+                )
                         + " AND "
-                        + serializeNode(node.right(), priority);
-                break;
+                        + serializeNode(
+                                node.right(),
+                                priority
+                        );
+            }
 
-            case OR:
-                result = serializeNode(node.left(), priority)
+            case OR -> {
+                result = serializeNode(
+                        node.left(),
+                        priority
+                )
                         + " OR "
-                        + serializeNode(node.right(), priority);
-                break;
+                        + serializeNode(
+                                node.right(),
+                                priority
+                        );
+            }
 
-            default:
-                throw new IllegalStateException(
-                        "Unsupported expression node"
-                );
+            default -> throw new IllegalStateException(
+                    "Невідомий тип вузла"
+            );
         }
 
         if (priority < parentPriority) {
@@ -636,13 +693,16 @@ public final class DialogueConditionExpressionParser {
     }
 
     private static String quoteIfNeeded(String value) {
-        if (value.matches("[a-zA-Z0-9_./-]+")) {
+        if (value.matches("[\\p{L}\\p{N}_./%*\\-]+")) {
             return value;
         }
 
         return "\""
                 + value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
+                        .replace("\"", "\\\"")
+                        .replace("\n", "\\n")
+                        .replace("\t", "\\t")
+                        .replace("\r", "\\r")
                 + "\"";
     }
 
@@ -682,7 +742,12 @@ public final class DialogueConditionExpressionParser {
                     case 'n' -> result.append('\n');
                     case 't' -> result.append('\t');
                     case 'r' -> result.append('\r');
-                    default -> result.append(current);
+                    case '"' -> result.append('"');
+                    case '\\' -> result.append('\\');
+                    default -> {
+                        result.append('\\');
+                        result.append(current);
+                    }
                 }
 
                 escaped = false;
@@ -704,29 +769,10 @@ public final class DialogueConditionExpressionParser {
             result.append(current);
         }
 
-        throw new IllegalArgumentException(
-                "Unclosed quotation at position " + start
+        throw new ParserException(
+                "Незакриті лапки",
+                start
         );
-    }
-
-    private static int extractPosition(String message) {
-        if (message == null) {
-            return 0;
-        }
-
-        int marker = message.lastIndexOf("position ");
-
-        if (marker < 0) {
-            return 0;
-        }
-
-        try {
-            return Integer.parseInt(
-                    message.substring(marker + 9).trim()
-            );
-        } catch (NumberFormatException exception) {
-            return 0;
-        }
     }
 
     private static String normalize(String value) {
@@ -742,15 +788,43 @@ public final class DialogueConditionExpressionParser {
     }
 
     /**
+     * Внутрішня помилка синтаксичного аналізу.
+     */
+    private static final class ParserException
+            extends IllegalArgumentException {
+
+        private final int position;
+
+        private ParserException(
+                String message,
+                int position
+        ) {
+            super(message);
+            this.position = Math.max(0, position);
+        }
+
+        private int position() {
+            return position;
+        }
+    }
+
+    /**
      * Внутрішній синтаксичний аналізатор.
      */
     private static final class Parser {
 
         private final List<Token> tokens;
-        private int current;
+        private final String source;
 
-        private Parser(List<Token> tokens) {
+        private int position;
+        private int depth;
+
+        private Parser(
+                List<Token> tokens,
+                String source
+        ) {
             this.tokens = Objects.requireNonNull(tokens);
+            this.source = Objects.requireNonNull(source);
         }
 
         private ExpressionNode parseExpression() {
@@ -766,7 +840,7 @@ public final class DialogueConditionExpressionParser {
         }
 
         /**
-         * OR має нижчий пріоритет за AND.
+         * OR має найнижчий пріоритет.
          */
         private ExpressionNode parseOr() {
             ExpressionNode expression = parseAnd();
@@ -775,14 +849,17 @@ public final class DialogueConditionExpressionParser {
                 ExpressionNode right = parseAnd();
 
                 expression = ExpressionNode.or(
-                  expression,
-                    right
+                        expression,
+                        right
                 );
             }
 
             return expression;
         }
 
+        /**
+         * AND має вищий пріоритет за OR.
+         */
         private ExpressionNode parseAnd() {
             ExpressionNode expression = parseUnary();
 
@@ -790,14 +867,17 @@ public final class DialogueConditionExpressionParser {
                 ExpressionNode right = parseUnary();
 
                 expression = ExpressionNode.and(
-                    expression,
-                    right
+                        expression,
+                        right
                 );
             }
 
             return expression;
         }
 
+        /**
+         * Обробляє унарний оператор NOT.
+         */
         private ExpressionNode parseUnary() {
             if (match(TokenType.NOT)) {
                 return ExpressionNode.not(parseUnary());
@@ -806,65 +886,80 @@ public final class DialogueConditionExpressionParser {
             return parsePrimary();
         }
 
+        /**
+         * Обробляє дужки та атомарні умови.
+         */
         private ExpressionNode parsePrimary() {
-            if (match(TokenType.LEFT_PAREN)) {
-                ExpressionNode expression = parseOr();
+            if (++depth > MAX_PARSE_DEPTH) {
+                depth--;
 
-                if (!match(TokenType.RIGHT_PAREN)) {
-                    throw error("Очікується закривальна дужка ')'");
+                throw error(
+                        "Перевищено максимальну глибину виразу"
+                );
+            }
+
+            try {
+                if (match(TokenType.LEFT_PAREN)) {
+                    ExpressionNode expression = parseOr();
+
+                    if (!match(TokenType.RIGHT_PAREN)) {
+                        throw error(
+                                "Очікується закривальна дужка ')'"
+                        );
+                    }
+
+                    return expression;
                 }
 
-                return expression;
+                return parseCondition();
+
+            } finally {
+                depth--;
             }
+        }
 
-            Token token = peek();
+        /**
+         * Читає умову у форматі TYPE:value.
+         */
+        private ExpressionNode parseCondition() {
+            Token typeToken = peek();
 
-            if (token == null) {
-                throw error("Неочікуваний кінець виразу");
-            }
-
-            if (token.type() != TokenType.VALUE) {
-                throw error("Очікується значення умови");
+            if (typeToken == null
+                    || typeToken.type() != TokenType.IDENTIFIER) {
+                throw error(
+                        "Очікується тип умови"
+                );
             }
 
             advance();
 
-            return ExpressionNode.reference(
-                parseReference(token.value())
-            );
-        }
-
-        private ConditionReference parseReference(String value) {
-            String normalized = value.trim();
-
-            if (normalized.isEmpty()) {
-                throw error("Порожнє посилання на умову");
-            }
-
-            int separator = normalized.indexOf(':');
-
-            if (separator < 0) {
-                return new ConditionReference(
-                    normalized,
-                    null
+            if (!match(TokenType.COLON)) {
+                throw error(
+                        "Після типу умови очікується ':'"
                 );
             }
 
-            String type = normalized.substring(0, separator).trim();
-            String argument = normalized.substring(separator + 1).trim();
+            Token valueToken = peek();
 
-            if (type.isEmpty()) {
-                throw error("Не вказано тип умови");
+            if (valueToken == null
+                    || (valueToken.type() != TokenType.IDENTIFIER
+                    && valueToken.type() != TokenType.STRING)) {
+                throw error(
+                        "Очікується значення умови"
+                );
             }
 
-            if (argument.isEmpty()) {
-                throw error("Не вказано значення умови");
-            }
+            advance();
 
-            return new ConditionReference(
-                type,
-                argument
-            );
+            try {
+                return ExpressionNode.condition(
+                        typeToken.value(),
+                        valueToken.value()
+                );
+
+            } catch (IllegalArgumentException exception) {
+                throw error(exception.getMessage());
+            }
         }
 
         private boolean match(TokenType type) {
@@ -878,7 +973,9 @@ public final class DialogueConditionExpressionParser {
 
         private boolean check(TokenType type) {
             Token token = peek();
-            return token != null && token.type() == type;
+
+            return token != null
+                    && token.type() == type;
         }
 
         private Token advance() {
@@ -890,7 +987,8 @@ public final class DialogueConditionExpressionParser {
         }
 
         private Token previous() {
-            if (position <= 0 || position - 1 >= tokens.size()) {
+            if (position <= 0
+                    || position - 1 >= tokens.size()) {
                 return null;
             }
 
@@ -905,17 +1003,17 @@ public final class DialogueConditionExpressionParser {
             return tokens.get(position);
         }
 
-        private ParseError error(String message) {
+        private ParserException error(String message) {
             Token token = peek();
 
             int offset = token == null
-                ? source.length()
-                : token.position();
+                    ? source.length()
+                    : token.position();
 
-            return new ParseError(
-                message,
-                offset
+            return new ParserException(
+                    message,
+                    offset
             );
         }
     }
-              
+}
