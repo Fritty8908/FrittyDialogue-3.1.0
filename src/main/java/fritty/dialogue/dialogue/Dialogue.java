@@ -12,11 +12,21 @@ public final class Dialogue {
     private String name;
 
     private final Map<String, Branch> branches;
+    private final DialogueSettings settings;
 
     public Dialogue(String id, String name) {
-        this.id = Objects.requireNonNull(id, "Dialogue ID cannot be null");
-        this.name = Objects.requireNonNull(name, "Dialogue name cannot be null");
+        this.id = Objects.requireNonNull(
+                id,
+                "Dialogue ID cannot be null"
+        );
+
+        this.name = Objects.requireNonNull(
+                name,
+                "Dialogue name cannot be null"
+        );
+
         this.branches = new LinkedHashMap<>();
+        this.settings = new DialogueSettings();
     }
 
     public Dialogue(String name) {
@@ -32,7 +42,10 @@ public final class Dialogue {
     }
 
     public void setName(String name) {
-        this.name = Objects.requireNonNull(name, "Dialogue name cannot be null");
+        this.name = Objects.requireNonNull(
+                name,
+                "Dialogue name cannot be null"
+        );
     }
 
     public Map<String, Branch> getBranches() {
@@ -48,7 +61,17 @@ public final class Dialogue {
     }
 
     public void addBranch(Branch branch) {
-        Objects.requireNonNull(branch, "Branch cannot be null");
+        Objects.requireNonNull(
+                branch,
+                "Branch cannot be null"
+        );
+
+        if (branch.isRoot() && getRootBranch() != null) {
+            throw new IllegalStateException(
+                    "Dialogue already has a root branch"
+            );
+        }
+
         branches.put(branch.getId(), branch);
     }
 
@@ -66,5 +89,13 @@ public final class Dialogue {
                 .filter(Branch::isRoot)
                 .findFirst()
                 .orElse(null);
+    }
+
+    public boolean hasRootBranch() {
+        return getRootBranch() != null;
+    }
+
+    public DialogueSettings getSettings() {
+        return settings;
     }
 }
